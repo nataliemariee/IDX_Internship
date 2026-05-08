@@ -135,6 +135,47 @@ print("\nProperty type breakdown (sample from March 2026):")
 print(sample['PropertyType'].value_counts())
 print(f"\nResidential share: {sample['PropertyType'].value_counts(normalize=True).get('Residential', 0)*100:.1f}%")
 
+# ── MORTGAGE RATE ENRICHMENT ───────────────────────────────────────────────────
+
+# Step 1 — Fetch the MORTGAGE30US series directly from FRED (no API key required)
+url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=MORTGAGE30US"
+mortgage = pd.read_csv(url, parse_dates=['observation_date'])
+mortgage.columns = ['date', 'rate_30yr_fixed']
+print(f"Fetched {len(mortgage)} weekly mortgage rate observations from FRED")
+
+# Step 2 — Resample weekly rates to monthly averages
+mortgage['year_month'] = mortgage['date'].dt.to_period('M')
+mortgage_monthly = (
+    mortgage.groupby('year_month')['rate_30yr_fixed']
+    .mean().reset_index()
+)
+print(f"Resampled to {len(mortgage_monthly)} monthly averages")
+
+# Step 3 — Create a matching year_month key on the sold dataset
+# Keying off CloseDate since this is the sold dataset
+sold['year_month'] = pd.to_datetime(sold['CloseDate']).dt.to_period('M')
+
+# Step 4 — Merge mortgage rates onto sold dataset
+sold_with_rates = sold.merge(mortgage_monthly, on='year_month', how='left')
+print(f"\nSold dataset rows before merge: {len(sold)}")
+print(f"Sold dataset rows after merge: {len(sold_with_rates)}")
+
+# Step 5 — Validate the merge (rate should not be null for any row)
+null_count = sold_with_rates['rate_30yr_fixed'].isnull().sum()
+print(f"Null rate values after merge: {null_count}")
+if null_count == 0:
+    print("Validation passed — all rows have a mortgage rate!")
+else:
+    print("Warning — some rows are missing a mortgage rate, investigate!")
+
+# Preview
+print("\nSample of merged data:")
+print(sold_with_rates[['CloseDate', 'year_month', 'ClosePrice', 'rate_30yr_fixed']].head())
+
+# Save enriched sold dataset
+sold_with_rates.to_csv('CRMLSSold_Combined.csv', index=False)
+print(f"\nSaved enriched CRMLSSold_Combined.csv — {len(sold_with_rates)} rows")
+
 # =============================================================================
 # WEEKS 4-5 — DATA CLEANING (coming soon)
 # =============================================================================
