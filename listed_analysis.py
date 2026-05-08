@@ -168,6 +168,114 @@ print(f"\nSaved enriched CRMLSListing_Combined.csv — {len(listings_with_rates)
 # WEEKS 4-5 — DATA CLEANING (coming soon)
 # =============================================================================
 
+# =============================================================================
+# WEEKS 4-5 — DATA CLEANING AND PREPARATION
+# =============================================================================
+
+# Before row count
+print(f"Row count before cleaning: {len(listings):,}")
+
+# 1. Convert date fields to datetime format
+# Date fields are read as text (object) by default — must convert for date math
+listings['CloseDate'] = pd.to_datetime(listings['CloseDate'])
+listings['PurchaseContractDate'] = pd.to_datetime(listings['PurchaseContractDate'])
+listings['ListingContractDate'] = pd.to_datetime(listings['ListingContractDate'])
+listings['ContractStatusChangeDate'] = pd.to_datetime(listings['ContractStatusChangeDate'])
+
+# Confirm conversion
+print("\nDate field types after conversion:")
+print(listings[['CloseDate', 'PurchaseContractDate',
+                 'ListingContractDate', 'ContractStatusChangeDate']].dtypes)
+
+# 2. Remove unnecessary or redundant columns
+# Dropping all columns flagged as >90% missing in Weeks 2-3
+# These columns are empty across all records and carry no analytical value
+columns_to_drop = high_missing.index.tolist()
+listings_clean = listings.drop(columns=columns_to_drop, errors='ignore')
+
+print(f"\nShape before dropping high-missing columns: {listings.shape}")
+print(f"Shape after dropping high-missing columns: {listings_clean.shape}")
+print(f"Columns dropped: {columns_to_drop}")
+
+# 3. Flag invalid numeric values
+# Flagging rather than deleting to preserve raw records for reference
+# ListPrice <= 0: a home cannot be listed for zero or negative dollars
+listings_clean['invalid_list_price'] = listings_clean['ListPrice'] <= 0
+# LivingArea <= 0: a home cannot have zero or negative square footage
+listings_clean['invalid_living_area'] = listings_clean['LivingArea'] <= 0
+# DaysOnMarket < 0: a home cannot sell before it is listed
+listings_clean['invalid_days_on_market'] = listings_clean['DaysOnMarket'] < 0
+# Negative bedrooms/bathrooms: physically impossible
+listings_clean['invalid_bedrooms'] = listings_clean['BedroomsTotal'] < 0
+listings_clean['invalid_bathrooms'] = listings_clean['BathroomsTotalInteger'] < 0
+
+print("\nInvalid numeric value counts:")
+print(f"  ListPrice <= 0:          {listings_clean['invalid_list_price'].sum():,}")
+print(f"  LivingArea <= 0:         {listings_clean['invalid_living_area'].sum():,}")
+print(f"  DaysOnMarket < 0:        {listings_clean['invalid_days_on_market'].sum():,}")
+print(f"  Negative Bedrooms:       {listings_clean['invalid_bedrooms'].sum():,}")
+print(f"  Negative Bathrooms:      {listings_clean['invalid_bathrooms'].sum():,}")
+
+# 4. Date consistency checks
+# ListingContractDate should precede PurchaseContractDate which should precede CloseDate
+# Flagging violations as boolean columns for filtering in later analysis
+
+# Close date comes before listing date — logically impossible
+listings_clean['listing_after_close_flag'] = listings_clean['CloseDate'] < listings_clean['ListingContractDate']
+# Close date comes before purchase contract date — logically impossible
+listings_clean['purchase_after_close_flag'] = listings_clean['CloseDate'] < listings_clean['PurchaseContractDate']
+# Purchase contract date comes before listing date — logically impossible
+listings_clean['negative_timeline_flag'] = listings_clean['PurchaseContractDate'] < listings_clean['ListingContractDate']
+
+print("\nDate consistency flag counts:")
+print(f"  listing_after_close_flag:   {listings_clean['listing_after_close_flag'].sum():,}")
+print(f"  purchase_after_close_flag:  {listings_clean['purchase_after_close_flag'].sum():,}")
+print(f"  negative_timeline_flag:     {listings_clean['negative_timeline_flag'].sum():,}")
+
+# 5. Geographic data checks
+# California bounding box: Latitude 32.5-42.0, Longitude -124.5 to -114.0
+# Missing coordinates — record has no lat/long at all
+listings_clean['missing_coords_flag'] = (
+    listings_clean['Latitude'].isnull() | listings_clean['Longitude'].isnull()
+)
+# Zero coordinates — sentinel null values (0,0 is in the Atlantic Ocean)
+listings_clean['zero_coords_flag'] = (
+    (listings_clean['Latitude'] == 0) | (listings_clean['Longitude'] == 0)
+)
+# Positive longitude — all California coordinates should be negative
+listings_clean['positive_longitude_flag'] = listings_clean['Longitude'] > 0
+# Out of state — coordinates fall outside California bounding box
+listings_clean['out_of_state_flag'] = (
+    (listings_clean['Latitude'] < 32.5) | (listings_clean['Latitude'] > 42.0) |
+    (listings_clean['Longitude'] < -124.5) | (listings_clean['Longitude'] > -114.0)
+) & ~listings_clean['missing_coords_flag']
+
+print("\nGeographic data quality summary:")
+print(f"  Missing coordinates:        {listings_clean['missing_coords_flag'].sum():,}")
+print(f"  Zero coordinates:           {listings_clean['zero_coords_flag'].sum():,}")
+print(f"  Positive longitude (error): {listings_clean['positive_longitude_flag'].sum():,}")
+print(f"  Out of state/implausible:   {listings_clean['out_of_state_flag'].sum():,}")
+
+# 6. Full data quality summary
+print("\nFULL DATA QUALITY SUMMARY:")
+print(f"  Total records: {len(listings_clean):,}")
+print(f"\n  -- Invalid Numeric Values --")
+print(f"  ListPrice <= 0:             {listings_clean['invalid_list_price'].sum():,}")
+print(f"  LivingArea <= 0:            {listings_clean['invalid_living_area'].sum():,}")
+print(f"  DaysOnMarket < 0:           {listings_clean['invalid_days_on_market'].sum():,}")
+print(f"\n  -- Date Consistency --")
+print(f"  listing_after_close_flag:   {listings_clean['listing_after_close_flag'].sum():,}")
+print(f"  purchase_after_close_flag:  {listings_clean['purchase_after_close_flag'].sum():,}")
+print(f"  negative_timeline_flag:     {listings_clean['negative_timeline_flag'].sum():,}")
+print(f"\n  -- Geographic --")
+print(f"  Missing coordinates:        {listings_clean['missing_coords_flag'].sum():,}")
+print(f"  Zero coordinates:           {listings_clean['zero_coords_flag'].sum():,}")
+print(f"  Positive longitude:         {listings_clean['positive_longitude_flag'].sum():,}")
+print(f"  Out of state:               {listings_clean['out_of_state_flag'].sum():,}")
+
+# After row count
+print(f"\nRow count after cleaning: {len(listings_clean):,}")
+print(f"Columns before: {listings.shape[1]} | Columns after: {listings_clean.shape[1]}")
 
 # =============================================================================
 # WEEK 6 — FEATURE ENGINEERING (coming soon)
@@ -183,5 +291,5 @@ print(f"\nSaved enriched CRMLSListing_Combined.csv — {len(listings_with_rates)
 # FINAL OUTPUT — Save clean CSV for Tableau
 # =============================================================================
 
-listings.to_csv('CRMLSListing_Combined.csv', index=False)
-print(f"\nSaved CRMLSListing_Combined.csv — {len(listings)} rows")
+listings_clean.to_csv('CRMLSListing_Cleaned.csv', index=False)
+print(f"\nSaved CRMLSListing_Cleaned.csv — {len(listings_clean):,} rows, {listings_clean.shape[1]} columns")
